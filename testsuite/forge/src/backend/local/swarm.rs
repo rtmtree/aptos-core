@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use aptos::common::types::EncodingType;
 use aptos_config::{
-    config::{NetworkConfig, NodeConfig},
+    config::{NetworkConfig, NodeConfig, OverrideNodeConfig},
     keys::ConfigKey,
     network_id::NetworkId,
 };
@@ -333,7 +333,7 @@ impl LocalSwarm {
     pub fn add_validator_fullnode(
         &mut self,
         version: &Version,
-        template: NodeConfig,
+        config: OverrideNodeConfig,
         validator_peer_id: PeerId,
     ) -> Result<PeerId> {
         let validator = self
@@ -356,7 +356,7 @@ impl LocalSwarm {
         let fullnode_config = FullnodeNodeConfig::validator_fullnode(
             name,
             self.dir.as_ref(),
-            template,
+            config,
             validator.config(),
             &self.genesis_waypoint,
             &self.genesis,
@@ -381,14 +381,14 @@ impl LocalSwarm {
         Ok(peer_id)
     }
 
-    fn add_fullnode(&mut self, version: &Version, template: NodeConfig) -> Result<PeerId> {
+    fn add_fullnode(&mut self, version: &Version, config: OverrideNodeConfig) -> Result<PeerId> {
         let name = self.node_name_counter.to_string();
         let index = self.node_name_counter;
         self.node_name_counter += 1;
         let fullnode_config = FullnodeNodeConfig::public_fullnode(
             name,
             self.dir.as_ref(),
-            template,
+            config,
             &self.genesis_waypoint,
             &self.genesis,
         )?;
@@ -550,14 +550,18 @@ impl Swarm for LocalSwarm {
     fn add_validator_full_node(
         &mut self,
         version: &Version,
-        template: NodeConfig,
+        config: OverrideNodeConfig,
         id: PeerId,
     ) -> Result<PeerId> {
-        self.add_validator_fullnode(version, template, id)
+        self.add_validator_fullnode(version, config, id)
     }
 
-    async fn add_full_node(&mut self, version: &Version, template: NodeConfig) -> Result<PeerId> {
-        self.add_fullnode(version, template)
+    async fn add_full_node(
+        &mut self,
+        version: &Version,
+        config: OverrideNodeConfig,
+    ) -> Result<PeerId> {
+        self.add_fullnode(version, config)
     }
 
     fn remove_full_node(&mut self, id: PeerId) -> Result<()> {
