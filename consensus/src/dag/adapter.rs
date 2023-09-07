@@ -33,9 +33,9 @@ use futures_channel::mpsc::UnboundedSender;
 use std::{collections::HashMap, sync::Arc};
 
 #[async_trait]
-pub trait Notifier: Send {
+pub trait Notifier: Send + Sync {
     fn send_ordered_nodes(
-        &mut self,
+        &self,
         ordered_nodes: Vec<Arc<CertifiedNode>>,
         failed_author: Vec<(Round, Author)>,
     ) -> anyhow::Result<()>;
@@ -64,7 +64,7 @@ impl NotifierAdapter {
 #[async_trait]
 impl Notifier for NotifierAdapter {
     fn send_ordered_nodes(
-        &mut self,
+        &self,
         ordered_nodes: Vec<Arc<CertifiedNode>>,
         failed_author: Vec<(Round, Author)>,
     ) -> anyhow::Result<()> {

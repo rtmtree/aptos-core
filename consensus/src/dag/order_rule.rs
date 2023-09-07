@@ -20,7 +20,7 @@ pub struct OrderRule {
     lowest_unordered_anchor_round: Round,
     dag: Arc<RwLock<Dag>>,
     anchor_election: Box<dyn AnchorElection>,
-    notifier: Box<dyn Notifier>,
+    notifier: Arc<dyn Notifier>,
     storage: Arc<dyn DAGStorage>,
 }
 
@@ -30,7 +30,7 @@ impl OrderRule {
         latest_ledger_info: LedgerInfo,
         dag: Arc<RwLock<Dag>>,
         anchor_election: Box<dyn AnchorElection>,
-        notifier: Box<dyn Notifier>,
+        notifier: Arc<dyn Notifier>,
         storage: Arc<dyn DAGStorage>,
     ) -> Self {
         // TODO: we need to initialize the anchor election based on the dag
