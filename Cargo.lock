@@ -831,15 +831,17 @@ dependencies = [
  "serde 1.0.149",
  "serde-name",
  "serde_bytes",
+ "serde_cbor_2",
  "serde_json",
  "sha2 0.10.6",
  "sha2 0.9.9",
  "sha3 0.9.1",
- "signature 2.1.0",
+ "signature",
  "static_assertions",
  "thiserror",
  "tiny-keccak",
  "trybuild",
+ "url",
  "x25519-dalek",
 ]
 
@@ -6143,7 +6145,7 @@ dependencies = [
  "digest 0.10.7",
  "elliptic-curve",
  "rfc6979",
- "signature 2.1.0",
+ "signature",
  "spki 0.7.2",
 ]
 
@@ -6154,7 +6156,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9c280362032ea4203659fc489832d0204ef09f247a0506f170dafcac08c369"
 dependencies = [
  "serde 1.0.149",
- "signature 1.6.0",
+ "signature",
 ]
 
 [[package]]
@@ -12275,6 +12277,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_cbor_2"
+version = "0.12.0-dev"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46d75f449e01f1eddbe9b00f432d616fbbd899b809c837d0fbc380496a0dd55"
+dependencies = [
+ "half 1.8.2",
+ "serde 1.0.149",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12535,12 +12547,6 @@ checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "signature"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0ea32af43239f0d353a7dd75a22d94c329c8cdaafdcb4c1c1335aa10c298a4a"
 
 [[package]]
 name = "signature"

@@ -38,6 +38,8 @@ rand = { workspace = true }
 rand_core = { workspace = true }
 ring = { workspace = true }
 serde = { workspace = true }
+serde_cbor_2 = { workspace = true }
+serde_json = { workspace = true }
 serde-name = { workspace = true }
 serde_bytes = { workspace = true }
 sha2 = { workspace = true }
@@ -48,6 +50,7 @@ tiny-keccak = { workspace = true }
 x25519-dalek = { workspace = true }
 p256 = { workspace = true }
 signature = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 ark-bls12-381 = { workspace = true }
