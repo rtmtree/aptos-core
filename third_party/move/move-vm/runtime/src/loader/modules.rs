@@ -440,6 +440,7 @@ impl Module {
                 function_instantiations.push(FunctionInstantiation {
                     handle,
                     instantiation,
+                    vtable_instantiation: func_inst.vtable_instantiation.clone(),
                 });
             }
 
