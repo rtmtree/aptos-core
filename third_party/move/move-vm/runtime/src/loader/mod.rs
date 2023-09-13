@@ -1665,6 +1665,7 @@ impl Script {
             return_types: return_tys.clone(),
             local_types: local_tys,
             parameter_types: parameter_tys.clone(),
+            acquired_resources: BTreeSet::new(),
         });
 
         let mut single_signature_token_map = BTreeMap::new();
