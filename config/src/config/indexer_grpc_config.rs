@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config::{
-    config_sanitizer::ConfigSanitizer, node_config_loader::NodeType, Error, NodeConfig,
+    config_optimizer::ConfigOptimizer, node_config_loader::NodeType, Error, NodeConfig,
 };
 use aptos_types::chain_id::ChainId;
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 
 // Useful indexer defaults
 const DEFAULT_ADDRESS: &str = "0.0.0.0:50051";
@@ -35,18 +36,23 @@ pub struct IndexerGrpcConfig {
     pub output_batch_size: Option<u16>,
 }
 
-impl ConfigSanitizer for IndexerGrpcConfig {
-    fn sanitize(
+impl ConfigOptimizer for IndexerGrpcConfig {
+    fn optimize(
         node_config: &mut NodeConfig,
+        _local_config_yaml: &Value,
         _node_type: NodeType,
         _chain_id: ChainId,
-    ) -> Result<(), Error> {
-        let indexer_grpc_config = &mut node_config.indexer_grpc;
-
+    ) -> Result<bool, Error> {
         // If the indexer is not enabled, we don't need to do anything
+        let indexer_grpc_config = &mut node_config.indexer_grpc;
         if !indexer_grpc_config.enabled {
-            return Ok(());
+            return Ok(false);
         }
+
+        // TODO: we really shouldn't be overriding the configs if they are
+        // specified in the local node config file. This optimizer should
+        // migrate to the pattern used by other optimizers, but for now, we'll
+        // just keep the legacy behaviour to avoid breaking anything.
 
         // Set appropriate defaults
         indexer_grpc_config.address = indexer_grpc_config
@@ -63,6 +69,6 @@ impl ConfigSanitizer for IndexerGrpcConfig {
             .output_batch_size
             .or(Some(DEFAULT_OUTPUT_BATCH_SIZE));
 
-        Ok(())
+        Ok(true)
     }
 }

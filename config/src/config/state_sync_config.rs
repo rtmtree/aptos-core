@@ -303,7 +303,7 @@ impl Default for AptosDataClientConfig {
 
 impl ConfigSanitizer for StateSyncConfig {
     fn sanitize(
-        node_config: &mut NodeConfig,
+        node_config: &NodeConfig,
         node_type: NodeType,
         chain_id: ChainId,
     ) -> Result<(), Error> {
@@ -314,12 +314,12 @@ impl ConfigSanitizer for StateSyncConfig {
 
 impl ConfigSanitizer for StateSyncDriverConfig {
     fn sanitize(
-        node_config: &mut NodeConfig,
+        node_config: &NodeConfig,
         _node_type: NodeType,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         let sanitizer_name = Self::get_sanitizer_name();
-        let state_sync_driver_config = &mut node_config.state_sync.state_sync_driver;
+        let state_sync_driver_config = &node_config.state_sync.state_sync_driver;
 
         // Verify that auto-bootstrapping is not enabled for
         // nodes that are fast syncing.
@@ -615,7 +615,7 @@ mod tests {
     fn test_sanitize_auto_bootstrapping_fast_sync() {
         // Create a node config with fast sync and
         // auto bootstrapping enabled.
-        let mut node_config = NodeConfig {
+        let node_config = NodeConfig {
             state_sync: StateSyncConfig {
                 state_sync_driver: StateSyncDriverConfig {
                     bootstrapping_mode: BootstrappingMode::DownloadLatestStates,
@@ -629,7 +629,7 @@ mod tests {
 
         // Verify that sanitization fails
         let error =
-            StateSyncConfig::sanitize(&mut node_config, NodeType::Validator, ChainId::testnet())
+            StateSyncConfig::sanitize(&node_config, NodeType::Validator, ChainId::testnet())
                 .unwrap_err();
         assert!(matches!(error, Error::ConfigSanitizerFailed(_, _)));
     }
