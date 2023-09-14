@@ -31,7 +31,9 @@ use aptos_testcases::{
     generate_traffic,
     load_vs_perf_benchmark::{LoadVsPerfBenchmark, TransactionWorkload, Workloads},
     modifiers::{CpuChaosTest, ExecutionDelayConfig, ExecutionDelayTest},
-    multi_region_network_test::MultiRegionNetworkEmulationTest,
+    multi_region_network_test::{
+        MultiRegionNetworkEmulationConfig, MultiRegionNetworkEmulationTest,
+    },
     network_bandwidth_test::NetworkBandwidthTest,
     network_loss_test::NetworkLossTest,
     network_partition_test::NetworkPartitionTest,
@@ -526,8 +528,8 @@ fn single_test_suite(
 ) -> Result<ForgeConfig> {
     let single_test_suite = match test_name {
         // Land-blocking tests to be run on every PR:
-        "land_blocking" => net_bench_realistic_env(), // TODO: remove this before landing
-        "realistic_env_max_load" => net_bench_realistic_env(), // TODO: remove this before landing
+        "land_blocking" => net_bench_two_region_env(), // TODO: remove this before landing
+        "realistic_env_max_load" => net_bench_two_region_env(), // TODO: remove this before landing
         "compat" => compat(),
         "framework_upgrade" => framework_upgrade(),
         // Rest of the tests:
@@ -587,7 +589,7 @@ fn single_test_suite(
         "pfn_performance_with_realistic_env" => pfn_performance(duration, true, true),
         "gather_metrics" => gather_metrics(),
         "net_bench" => net_bench(),
-        "net_bench_realistic_env" => net_bench_realistic_env(),
+        "net_bench_two_region_env" => net_bench_two_region_env(),
         _ => return Err(format_err!("Invalid --suite given: {:?}", test_name)),
     };
     Ok(single_test_suite)
@@ -597,6 +599,15 @@ fn wrap_with_realistic_env<T: NetworkTest + 'static>(test: T) -> CompositeNetwor
     CompositeNetworkTest::new_with_two_wrappers(
         MultiRegionNetworkEmulationTest::default(),
         CpuChaosTest::default(),
+        test,
+    )
+}
+
+fn wrap_with_two_region_env<T: NetworkTest + 'static>(test: T) -> CompositeNetworkTest {
+    CompositeNetworkTest::new(
+        MultiRegionNetworkEmulationTest::new_with_config(
+            MultiRegionNetworkEmulationConfig::two_region(),
+        ),
         test,
     )
 }
@@ -1346,17 +1357,24 @@ fn gather_metrics() -> ForgeConfig {
         .add_network_test(GatherMetrics)
 }
 
-fn netbench_config() -> NetbenchConfig {
+fn netbench_config_100_megabytes_per_s() -> NetbenchConfig {
     NetbenchConfig {
         enabled: true,
         max_network_channel_size: 1000,
         enable_direct_send_testing: true,
         direct_send_data_size: 100000,
         direct_send_per_second: 1000,
-        enable_rpc_testing: false,
-        rpc_data_size: 100000,
-        rpc_per_second: 1000000,
-        rpc_in_flight: 8,
+        ..Default::default()
+    }
+}
+
+fn netbench_config_20_megabytes_per_s() -> NetbenchConfig {
+    NetbenchConfig {
+        enabled: true,
+        max_network_channel_size: 1000,
+        enable_direct_send_testing: true,
+        direct_send_data_size: 100000,
+        direct_send_per_second: 200,
         ..Default::default()
     }
 }
@@ -1366,16 +1384,17 @@ fn net_bench() -> ForgeConfig {
         .add_network_test(Delay::new(180))
         .with_initial_validator_count(NonZeroUsize::new(2).unwrap())
         .with_validator_override_node_config_fn(Arc::new(|config, _| {
-            config.netbench = Some(netbench_config());
+            config.netbench = Some(netbench_config_100_megabytes_per_s());
         }))
 }
 
-fn net_bench_realistic_env() -> ForgeConfig {
+fn net_bench_two_region_env() -> ForgeConfig {
     ForgeConfig::default()
-        .add_network_test(wrap_with_realistic_env(Delay::new(180)))
+        .add_network_test(wrap_with_two_region_env(Delay::new(180)))
         .with_initial_validator_count(NonZeroUsize::new(2).unwrap())
         .with_validator_override_node_config_fn(Arc::new(|config, _| {
-            config.netbench = Some(netbench_config());
+            // Not using 100 MBps here, as it will lead to throughput collapse
+            config.netbench = Some(netbench_config_20_megabytes_per_s());
         }))
 }
 
