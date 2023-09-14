@@ -1,7 +1,7 @@
 // Copyright © Aptos Foundation
 
 use super::{
-    adapter::Notifier,
+    adapter::{Notifier, NotifierAdapter},
     anchor_election::RoundRobinAnchorElection,
     dag_driver::DagDriver,
     dag_fetcher::{DagFetcherService, FetchRequestHandler},
@@ -15,8 +15,8 @@ use super::{
     types::{CertifiedNodeMessage, DAGMessage},
 };
 use crate::{
-    dag::{adapter::NotifierAdapter, dag_fetcher::DagFetcher},
-    experimental::{buffer_manager::OrderedBlocks, commit_reliable_broadcast::DropGuard},
+    dag::dag_fetcher::DagFetcher,
+    experimental::buffer_manager::OrderedBlocks,
     network::IncomingDAGRequest,
     state_replication::{PayloadClient, StateComputer},
 };
@@ -25,16 +25,11 @@ use aptos_channels::{
     message_queues::QueueStyle,
 };
 use aptos_consensus_types::common::Author;
-use aptos_crypto::HashValue;
 use aptos_infallible::RwLock;
-use aptos_logger::error;
+use aptos_logger::{debug, error};
 use aptos_reliable_broadcast::{RBNetworkSender, ReliableBroadcast};
 use aptos_types::{
-    aggregate_signature::AggregateSignature,
-    block_info::BlockInfo,
-    epoch_state::EpochState,
-    ledger_info::{LedgerInfo, LedgerInfoWithSignatures},
-    validator_signer::ValidatorSigner,
+    epoch_state::EpochState, ledger_info::LedgerInfo, validator_signer::ValidatorSigner,
 };
 use futures::{
     stream::{AbortHandle, Abortable},
@@ -48,7 +43,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{select, task::JoinHandle};
 use tokio_retry::strategy::ExponentialBackoff;
 
-struct DagBootstrapper {
+pub struct DagBootstrapper {
     self_peer: Author,
     signer: ValidatorSigner,
     epoch_state: Arc<EpochState>,
@@ -61,7 +56,7 @@ struct DagBootstrapper {
 }
 
 impl DagBootstrapper {
-    fn new(
+    pub fn new(
         self_peer: Author,
         signer: ValidatorSigner,
         epoch_state: Arc<EpochState>,
@@ -90,10 +85,16 @@ impl DagBootstrapper {
         latest_ledger_info: LedgerInfo,
         notifier: Arc<dyn Notifier>,
     ) -> (Arc<RwLock<Dag>>, OrderRule) {
+        let highest_committed_anchor_round = if latest_ledger_info.ends_epoch() {
+            0
+        } else {
+            latest_ledger_info.round()
+        };
+
         let dag = Arc::new(RwLock::new(Dag::new(
             self.epoch_state.clone(),
             self.storage.clone(),
-            latest_ledger_info.round(),
+            highest_committed_anchor_round,
             DAG_WINDOW,
         )));
 
@@ -173,7 +174,7 @@ impl DagBootstrapper {
         (dag_handler, dag_fetcher)
     }
 
-    async fn bootstrapper(
+    pub async fn bootstrapper(
         self,
         mut dag_rpc_rx: Receiver<Author, IncomingDAGRequest>,
         ordered_nodes_tx: UnboundedSender<OrderedBlocks>,
@@ -189,13 +190,20 @@ impl DagBootstrapper {
             self.storage.clone(),
         );
 
-        // TODO: fetch the correct block info
-        let ledger_info = LedgerInfoWithSignatures::new(
-            LedgerInfo::new(BlockInfo::empty(), HashValue::zero()),
-            AggregateSignature::empty(),
-        );
+        let mut shutdown_rx = shutdown_rx.into_stream();
 
         loop {
+            debug!(
+                "Bootstrapping DAG instance for epoch {}",
+                self.epoch_state.epoch
+            );
+
+            // TODO: make sure this will get the correct ledger info after state sync
+            let ledger_info = self
+                .storage
+                .get_latest_ledger_info()
+                .expect("latest ledger info must exist");
+
             let (dag_store, order_rule) =
                 self.bootstrap_dag_store(ledger_info.ledger_info().clone(), adapter.clone());
 
@@ -209,12 +217,16 @@ impl DagBootstrapper {
             // poll the network handler while waiting for rebootstrap notification or shutdown notification
             select! {
                 biased;
-                _ = &mut shutdown_rx => {
+                Ok(ack_tx) = shutdown_rx.select_next_some() => {
                     df_handle.abort();
                     let _ = df_handle.await;
+                    if let Err(e) = ack_tx.send(()) {
+                        error!(error = ?e, "unable to ack to shutdown signal");
+                    }
                     return;
                 },
                 certified_node_msg = handler.run(&mut dag_rpc_rx) => {
+                    debug!("state sync notification received. {:?}", certified_node_msg);
                     df_handle.abort();
                     let _ = df_handle.await;
 
@@ -223,6 +235,7 @@ impl DagBootstrapper {
                     if let Err(e) = sync_manager.sync_dag_to(&certified_node_msg, dag_fetcher, dag_store.clone()).await {
                         error!(error = ?e, "unable to sync");
                     }
+                    debug!("going to rebootstrap.");
                 }
             }
         }

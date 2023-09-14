@@ -2,7 +2,11 @@
 
 use crate::dag::types::{CertifiedNode, Extensions, Node, NodeCertificate};
 use aptos_consensus_types::common::{Author, Payload, Round};
-use aptos_types::aggregate_signature::AggregateSignature;
+use aptos_types::{
+    aggregate_signature::{AggregateSignature, PartialSignatures},
+    validator_signer::ValidatorSigner,
+    validator_verifier::ValidatorVerifier,
+};
 
 pub(crate) fn new_certified_node(
     round: Round,

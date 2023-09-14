@@ -17,7 +17,7 @@ use crate::{
 use anyhow::bail;
 use aptos_channels::aptos_channel;
 use aptos_consensus_types::common::Author;
-use aptos_logger::{error, warn};
+use aptos_logger::{debug, error, warn};
 use aptos_network::protocols::network::RpcError;
 use aptos_types::epoch_state::EpochState;
 use bytes::Bytes;
@@ -63,7 +63,7 @@ impl NetworkHandler {
         // TODO(ibalajiarun): clean up Reliable Broadcast storage periodically.
         loop {
             select! {
-                Some(msg) = dag_rpc_rx.next() => {
+                msg = dag_rpc_rx.select_next_some() => {
                     match self.process_rpc(msg).await {
                         Ok(sync_status) => {
                             if let StateSyncStatus::NeedsSync(certified_node_msg) = sync_status {
@@ -78,7 +78,7 @@ impl NetworkHandler {
                 Some(res) = self.node_fetch_waiter.next() => {
                     match res {
                         Ok(node) => if let Err(e) = self.node_receiver.process(node).await {
-                        warn!(error = ?e, "error processing node fetch notification");
+                            warn!(error = ?e, "error processing node fetch notification");
                         },
                         Err(e) => {
                             debug!("sender dropped channel: {}", e);
@@ -121,6 +121,8 @@ impl NetworkHandler {
     ) -> anyhow::Result<StateSyncStatus> {
         let dag_message: DAGMessage = rpc_request.req.try_into()?;
 
+        debug!("processing rpc: {:?}", dag_message);
+
         let author = dag_message
             .author()
             .map_err(|_| anyhow::anyhow!("unexpected rpc message {:?}", dag_message))?;
@@ -134,17 +136,17 @@ impl NetworkHandler {
                     DAGMessage::NodeMsg(node) => {
                         self.node_receiver.process(node).await.map(|r| r.into())
                     },
-            DAGMessage::CertifiedNodeMsg(certified_node_msg) => {
+                    DAGMessage::CertifiedNodeMsg(certified_node_msg) => {
                         match self.state_sync_trigger.check(certified_node_msg).await {
-                        ret @ (NeedsSync(_), None) => return Ok(ret.0),
-                        (Synced, Some(certified_node_msg)) => self
-                            .dag_driver
-                            .process(certified_node_msg.certified_node())
+                            ret @ (NeedsSync(_), None) => return Ok(ret.0),
+                            (Synced, Some(certified_node_msg)) => self
+                                .dag_driver
+                                .process(certified_node_msg.certified_node())
                                 .await
-                            .map(|r| r.into()),
-                        _ => unreachable!(),
+                                .map(|r| r.into()),
+                            _ => unreachable!(),
                         }
-            },
+                    },
                     DAGMessage::FetchRequest(request) => {
                         self.fetch_receiver.process(request).await.map(|r| r.into())
                     },
@@ -153,6 +155,8 @@ impl NetworkHandler {
                 Err(err) => Err(err),
             }
         };
+
+        debug!("responding to process_rpc {:?}", response);
 
         let response = response
             .and_then(|response_msg| {

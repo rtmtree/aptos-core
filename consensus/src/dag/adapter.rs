@@ -147,11 +147,11 @@ impl Notifier for NotifierAdapter {
     }
 
     async fn send_epoch_change(&self, _proof: EpochChangeProof) {
-        todo!()
+        // todo!()
     }
 
     async fn send_commit_proof(&self, _ledger_info: LedgerInfoWithSignatures) {
-        todo!()
+        // todo!()
     }
 }
 

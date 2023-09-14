@@ -19,5 +19,9 @@ mod storage;
 mod tests;
 mod types;
 
+pub use adapter::StorageAdapter;
+pub use bootstrap::DagBootstrapper;
 pub use dag_network::{RpcHandler, RpcWithFallback, TDAGNetworkSender};
+pub use storage::DAGStorage;
 pub use types::{CertifiedNode, DAGMessage, DAGNetworkMessage, Extensions, Node, NodeId, Vote};
+pub use commit_signer::DagCommitSigner;

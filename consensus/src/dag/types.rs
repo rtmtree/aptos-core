@@ -452,6 +452,10 @@ impl TDAGMessage for CertifiedNodeMessage {
     fn verify(&self, verifier: &ValidatorVerifier) -> anyhow::Result<()> {
         self.inner.verify(verifier)?;
 
+        if self.ledger_info.commit_info().round() == 0 {
+            return Ok(());
+        }
+
         self.ledger_info
             .verify_signatures(verifier)
             .map_err(|e| anyhow::anyhow!("unable to verify ledger info: {}", e))

@@ -366,6 +366,11 @@ impl Dag {
     }
 
     pub(super) fn highest_committed_anchor_round(&self) -> Round {
-        self.highest_committed_anchor_round
+        // TODO: update this info
+        self.storage
+            .get_latest_ledger_info()
+            .expect("must exist")
+            .commit_info()
+            .round()
     }
 }

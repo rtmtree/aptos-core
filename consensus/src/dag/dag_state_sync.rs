@@ -85,10 +85,9 @@ impl StateSyncTrigger {
         // (meaning consensus is behind) or
         // the highest committed anchor round is 2*DAG_WINDOW behind the given ledger info round
         // (meaning execution is behind the DAG window)
-        (dag_reader
+        dag_reader
             .highest_ordered_anchor_round()
-            .unwrap_or_default()
-            < li.commit_info().round())
+            .is_some_and(|r| r < li.commit_info().round())
             || dag_reader.highest_committed_anchor_round()
                 + ((STATE_SYNC_WINDOW_MULTIPLIER * DAG_WINDOW) as Round)
                 < li.commit_info().round()
