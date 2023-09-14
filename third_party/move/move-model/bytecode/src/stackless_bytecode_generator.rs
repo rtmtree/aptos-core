@@ -1423,6 +1423,7 @@ impl<'a> StacklessBytecodeGenerator<'a> {
                     None,
                 ))
             },
+            MoveBytecode::CallVirtual(_) => unimplemented!(),
         }
     }
 
