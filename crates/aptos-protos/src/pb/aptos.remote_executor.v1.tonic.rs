@@ -1,15 +1,15 @@
 // @generated
 /// Generated client implementations.
-pub mod raw_data_client {
+pub mod network_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     ///
     #[derive(Debug, Clone)]
-    pub struct RawDataClient<T> {
+    pub struct NetworkServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl RawDataClient<tonic::transport::Channel> {
+    impl NetworkServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -20,7 +20,7 @@ pub mod raw_data_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> RawDataClient<T>
+    impl<T> NetworkServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -38,7 +38,7 @@ pub mod raw_data_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> RawDataClient<InterceptedService<T, F>>
+        ) -> NetworkServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -52,7 +52,7 @@ pub mod raw_data_client {
                 http::Request<tonic::body::BoxBody>,
             >>::Error: Into<StdError> + Send + Sync,
         {
-            RawDataClient::new(InterceptedService::new(inner, interceptor))
+            NetworkServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -85,15 +85,11 @@ pub mod raw_data_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /** Get transactions batch without any filtering from starting version and end if transaction count is present.
-*/
-        pub async fn get_transactions(
+        ///
+        pub async fn send(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetTransactionsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::TransactionsResponse>>,
-            tonic::Status,
-        > {
+            request: impl tonic::IntoRequest<super::NetworkMessage>,
+        ) -> std::result::Result<tonic::Response<super::Empty>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -105,41 +101,33 @@ pub mod raw_data_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/aptos.indexer.v1.RawData/GetTransactions",
+                "/aptos.remote_executor.v1.NetworkService/Send",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("aptos.indexer.v1.RawData", "GetTransactions"));
-            self.inner.server_streaming(req, path, codec).await
+                .insert(
+                    GrpcMethod::new("aptos.remote_executor.v1.NetworkService", "Send"),
+                );
+            self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod raw_data_server {
+pub mod network_service_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with RawDataServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with NetworkServiceServer.
     #[async_trait]
-    pub trait RawData: Send + Sync + 'static {
-        /// Server streaming response type for the GetTransactions method.
-        type GetTransactionsStream: futures_core::Stream<
-                Item = std::result::Result<super::TransactionsResponse, tonic::Status>,
-            >
-            + Send
-            + 'static;
-        /** Get transactions batch without any filtering from starting version and end if transaction count is present.
-*/
-        async fn get_transactions(
+    pub trait NetworkService: Send + Sync + 'static {
+        ///
+        async fn send(
             &self,
-            request: tonic::Request<super::GetTransactionsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<Self::GetTransactionsStream>,
-            tonic::Status,
-        >;
+            request: tonic::Request<super::NetworkMessage>,
+        ) -> std::result::Result<tonic::Response<super::Empty>, tonic::Status>;
     }
     ///
     #[derive(Debug)]
-    pub struct RawDataServer<T: RawData> {
+    pub struct NetworkServiceServer<T: NetworkService> {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
@@ -147,7 +135,7 @@ pub mod raw_data_server {
         max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
-    impl<T: RawData> RawDataServer<T> {
+    impl<T: NetworkService> NetworkServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -199,9 +187,9 @@ pub mod raw_data_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for RawDataServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for NetworkServiceServer<T>
     where
-        T: RawData,
+        T: NetworkService,
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
@@ -217,28 +205,23 @@ pub mod raw_data_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/aptos.indexer.v1.RawData/GetTransactions" => {
+                "/aptos.remote_executor.v1.NetworkService/Send" => {
                     #[allow(non_camel_case_types)]
-                    struct GetTransactionsSvc<T: RawData>(pub Arc<T>);
+                    struct SendSvc<T: NetworkService>(pub Arc<T>);
                     impl<
-                        T: RawData,
-                    > tonic::server::ServerStreamingService<
-                        super::GetTransactionsRequest,
-                    > for GetTransactionsSvc<T> {
-                        type Response = super::TransactionsResponse;
-                        type ResponseStream = T::GetTransactionsStream;
+                        T: NetworkService,
+                    > tonic::server::UnaryService<super::NetworkMessage> for SendSvc<T> {
+                        type Response = super::Empty;
                         type Future = BoxFuture<
-                            tonic::Response<Self::ResponseStream>,
+                            tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetTransactionsRequest>,
+                            request: tonic::Request<super::NetworkMessage>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                (*inner).get_transactions(request).await
-                            };
+                            let fut = async move { (*inner).send(request).await };
                             Box::pin(fut)
                         }
                     }
@@ -249,7 +232,7 @@ pub mod raw_data_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = GetTransactionsSvc(inner);
+                        let method = SendSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -260,7 +243,7 @@ pub mod raw_data_server {
                                 max_decoding_message_size,
                                 max_encoding_message_size,
                             );
-                        let res = grpc.server_streaming(method, req).await;
+                        let res = grpc.unary(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
@@ -280,7 +263,7 @@ pub mod raw_data_server {
             }
         }
     }
-    impl<T: RawData> Clone for RawDataServer<T> {
+    impl<T: NetworkService> Clone for NetworkServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -292,7 +275,7 @@ pub mod raw_data_server {
             }
         }
     }
-    impl<T: RawData> Clone for _Inner<T> {
+    impl<T: NetworkService> Clone for _Inner<T> {
         fn clone(&self) -> Self {
             Self(Arc::clone(&self.0))
         }
@@ -302,7 +285,7 @@ pub mod raw_data_server {
             write!(f, "{:?}", self.0)
         }
     }
-    impl<T: RawData> tonic::server::NamedService for RawDataServer<T> {
-        const NAME: &'static str = "aptos.indexer.v1.RawData";
+    impl<T: NetworkService> tonic::server::NamedService for NetworkServiceServer<T> {
+        const NAME: &'static str = "aptos.remote_executor.v1.NetworkService";
     }
 }

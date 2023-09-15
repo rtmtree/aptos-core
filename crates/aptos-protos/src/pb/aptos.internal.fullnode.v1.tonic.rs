@@ -1,5 +1,3 @@
-// Copyright © Aptos Foundation
-
 // @generated
 /// Generated client implementations.
 pub mod fullnode_data_client {
@@ -15,7 +13,7 @@ pub mod fullnode_data_client {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
-            D: std::convert::TryInto<tonic::transport::Endpoint>,
+            D: TryInto<tonic::transport::Endpoint>,
             D::Error: Into<StdError>,
         {
             let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
@@ -71,11 +69,27 @@ pub mod fullnode_data_client {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
         ///
         pub async fn get_transactions_from_node(
             &mut self,
             request: impl tonic::IntoRequest<super::GetTransactionsFromNodeRequest>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<super::TransactionsFromNodeResponse>,
             >,
@@ -94,7 +108,15 @@ pub mod fullnode_data_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/aptos.internal.fullnode.v1.FullnodeData/GetTransactionsFromNode",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "aptos.internal.fullnode.v1.FullnodeData",
+                        "GetTransactionsFromNode",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
     }
 }
@@ -107,7 +129,10 @@ pub mod fullnode_data_server {
     pub trait FullnodeData: Send + Sync + 'static {
         /// Server streaming response type for the GetTransactionsFromNode method.
         type GetTransactionsFromNodeStream: futures_core::Stream<
-                Item = Result<super::TransactionsFromNodeResponse, tonic::Status>,
+                Item = std::result::Result<
+                    super::TransactionsFromNodeResponse,
+                    tonic::Status,
+                >,
             >
             + Send
             + 'static;
@@ -115,7 +140,10 @@ pub mod fullnode_data_server {
         async fn get_transactions_from_node(
             &self,
             request: tonic::Request<super::GetTransactionsFromNodeRequest>,
-        ) -> Result<tonic::Response<Self::GetTransactionsFromNodeStream>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<Self::GetTransactionsFromNodeStream>,
+            tonic::Status,
+        >;
     }
     ///
     #[derive(Debug)]
@@ -123,6 +151,8 @@ pub mod fullnode_data_server {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
+        max_decoding_message_size: Option<usize>,
+        max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
     impl<T: FullnodeData> FullnodeDataServer<T> {
@@ -135,6 +165,8 @@ pub mod fullnode_data_server {
                 inner,
                 accept_compression_encodings: Default::default(),
                 send_compression_encodings: Default::default(),
+                max_decoding_message_size: None,
+                max_encoding_message_size: None,
             }
         }
         pub fn with_interceptor<F>(
@@ -158,6 +190,22 @@ pub mod fullnode_data_server {
             self.send_compression_encodings.enable(encoding);
             self
         }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.max_decoding_message_size = Some(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.max_encoding_message_size = Some(limit);
+            self
+        }
     }
     impl<T, B> tonic::codegen::Service<http::Request<B>> for FullnodeDataServer<T>
     where
@@ -171,7 +219,7 @@ pub mod fullnode_data_server {
         fn poll_ready(
             &mut self,
             _cx: &mut Context<'_>,
-        ) -> Poll<Result<(), Self::Error>> {
+        ) -> Poll<std::result::Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
@@ -197,7 +245,7 @@ pub mod fullnode_data_server {
                                 super::GetTransactionsFromNodeRequest,
                             >,
                         ) -> Self::Future {
-                            let inner = self.0.clone();
+                            let inner = Arc::clone(&self.0);
                             let fut = async move {
                                 (*inner).get_transactions_from_node(request).await
                             };
@@ -206,6 +254,8 @@ pub mod fullnode_data_server {
                     }
                     let accept_compression_encodings = self.accept_compression_encodings;
                     let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
@@ -215,6 +265,10 @@ pub mod fullnode_data_server {
                             .apply_compression_config(
                                 accept_compression_encodings,
                                 send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
                             );
                         let res = grpc.server_streaming(method, req).await;
                         Ok(res)
@@ -243,12 +297,14 @@ pub mod fullnode_data_server {
                 inner,
                 accept_compression_encodings: self.accept_compression_encodings,
                 send_compression_encodings: self.send_compression_encodings,
+                max_decoding_message_size: self.max_decoding_message_size,
+                max_encoding_message_size: self.max_encoding_message_size,
             }
         }
     }
     impl<T: FullnodeData> Clone for _Inner<T> {
         fn clone(&self) -> Self {
-            Self(self.0.clone())
+            Self(Arc::clone(&self.0))
         }
     }
     impl<T: std::fmt::Debug> std::fmt::Debug for _Inner<T> {
