@@ -209,7 +209,20 @@ impl MultiRegionNetworkEmulationConfig {
     pub fn two_region() -> Self {
         Self {
             link_stats_table: get_link_stats_table(TWO_REGION_LINK_STATS),
-            ..Default::default()
+            inter_region_config: InterRegionNetEmConfig {
+                delay_jitter_ms: 0,
+                delay_correlation_percentage: 50,
+                loss_percentage: 0,
+                loss_correlation_percentage: 50,
+            },
+            intra_region_config: Some(IntraRegionNetEmConfig {
+                bandwidth_rate_mbps: 10 * 1000, // 10 Gbps
+                delay_latency_ms: 2,
+                delay_jitter_ms: 0,
+                delay_correlation_percentage: 50,
+                loss_percentage: 0,
+                loss_correlation_percentage: 50,
+            }),
         }
     }
 }
