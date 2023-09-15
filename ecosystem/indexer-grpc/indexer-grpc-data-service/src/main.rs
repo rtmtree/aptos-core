@@ -12,14 +12,8 @@ use aptos_protos::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, net::ToSocketAddrs};
-use tonic::{
-    codec::CompressionEncoding,
-    codegen::InterceptedService,
-    metadata::{Ascii, MetadataValue},
-    transport::Server,
-    Request, Status,
-};
+use std::net::ToSocketAddrs;
+use tonic::{codec::CompressionEncoding, transport::Server};
 
 // HTTP2 ping interval and timeout.
 // This can help server to garbage collect dead connections.
@@ -50,7 +44,7 @@ pub struct IndexerGrpcDataServiceConfig {
     pub data_service_grpc_non_tls_config: Option<NonTlsConfig>,
     // The size of the response channel that response can be buffered.
     pub data_service_response_channel_size: Option<usize>,
-    // A list of auth tokens that are allowed to access the service.
+    // (Deprecated) A list of auth tokens that are allowed to access the service.
     pub whitelisted_auth_tokens: Vec<String>,
     // File store config.
     pub file_store_config: IndexerGrpcFileStoreConfig,
@@ -61,22 +55,6 @@ pub struct IndexerGrpcDataServiceConfig {
 #[async_trait::async_trait]
 impl RunnableConfig for IndexerGrpcDataServiceConfig {
     async fn run(&self) -> Result<()> {
-        let token_set = build_auth_token_set(self.whitelisted_auth_tokens.clone());
-        let authentication_inceptor =
-            move |req: Request<()>| -> std::result::Result<Request<()>, Status> {
-                let metadata = req.metadata();
-                if let Some(token) =
-                    metadata.get(aptos_indexer_grpc_utils::constants::GRPC_AUTH_TOKEN_HEADER)
-                {
-                    if token_set.contains(token) {
-                        std::result::Result::Ok(req)
-                    } else {
-                        Err(Status::unauthenticated("Invalid token"))
-                    }
-                } else {
-                    Err(Status::unauthenticated("Missing token"))
-                }
-            };
         let reflection_service = tonic_reflection::server::Builder::configure()
             // Note: It is critical that the file descriptor set is registered for every
             // file that the top level API proto depends on recursively. If you don't,
@@ -98,9 +76,7 @@ impl RunnableConfig for IndexerGrpcDataServiceConfig {
         let svc = aptos_protos::indexer::v1::raw_data_server::RawDataServer::new(server)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        let svc_with_interceptor = InterceptedService::new(svc, authentication_inceptor);
-
-        let svc_with_interceptor_clone = svc_with_interceptor.clone();
+        let svc_clone = svc.clone();
         let reflection_service_clone = reflection_service.clone();
 
         let mut tasks = vec![];
@@ -120,7 +96,7 @@ impl RunnableConfig for IndexerGrpcDataServiceConfig {
                 Server::builder()
                     .http2_keepalive_interval(Some(HTTP2_PING_INTERVAL_DURATION))
                     .http2_keepalive_timeout(Some(HTTP2_PING_TIMEOUT_DURATION))
-                    .add_service(svc_with_interceptor_clone)
+                    .add_service(svc_clone)
                     .add_service(reflection_service_clone)
                     .serve(grpc_address)
                     .await
@@ -148,7 +124,7 @@ impl RunnableConfig for IndexerGrpcDataServiceConfig {
                     .http2_keepalive_interval(Some(HTTP2_PING_INTERVAL_DURATION))
                     .http2_keepalive_timeout(Some(HTTP2_PING_TIMEOUT_DURATION))
                     .tls_config(tonic::transport::ServerTlsConfig::new().identity(identity))?
-                    .add_service(svc_with_interceptor)
+                    .add_service(svc)
                     .add_service(reflection_service)
                     .serve(grpc_address)
                     .await
@@ -167,15 +143,6 @@ impl RunnableConfig for IndexerGrpcDataServiceConfig {
     fn get_server_name(&self) -> String {
         "idxdata".to_string()
     }
-}
-
-/// Build a set of whitelisted auth tokens. Invalid tokens are ignored.
-pub fn build_auth_token_set(whitelisted_auth_tokens: Vec<String>) -> HashSet<MetadataValue<Ascii>> {
-    whitelisted_auth_tokens
-        .into_iter()
-        .map(|token| token.parse::<MetadataValue<Ascii>>())
-        .filter_map(Result::ok)
-        .collect::<HashSet<_>>()
 }
 
 #[tokio::main]
