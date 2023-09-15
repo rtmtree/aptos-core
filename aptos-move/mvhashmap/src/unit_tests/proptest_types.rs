@@ -3,19 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::{
-    types::{MVDataError, MVDataOutput, TxnIndex},
+    types::{test::KeyType, MVDataError, MVDataOutput, TxnIndex},
     MVHashMap,
 };
-use crate::unit_tests::KeyType;
-use aptos_aggregator::{
-    delta_change_set::{delta_add, delta_sub, DeltaOp},
-    transaction::AggregatorValue,
-};
+use aptos_aggregator::delta_change_set::{delta_add, delta_sub, DeltaOp};
 use aptos_types::{
     executable::ExecutableTestType, state_store::state_value::StateValue,
     write_set::TransactionWrite,
 };
 use bytes::Bytes;
+use claims::assert_none;
 use proptest::{collection::vec, prelude::*, sample::Index, strategy::Strategy};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -44,25 +41,36 @@ enum ExpectedOutput<V: Debug + Clone + PartialEq> {
     Failure,
 }
 
-struct Value<V>(Option<V>);
+struct Value<V> {
+    maybe_value: Option<V>,
+    maybe_bytes: Option<Bytes>,
+}
+
+impl<V: Into<Vec<u8>> + Clone> Value<V> {
+    fn new(maybe_value: Option<V>) -> Self {
+        let maybe_bytes = maybe_value.clone().map(|v| {
+            let mut bytes = v.into();
+            bytes.resize(16, 0);
+            bytes.into()
+        });
+        Self {
+            maybe_value,
+            maybe_bytes,
+        }
+    }
+}
 
 impl<V: Into<Vec<u8>> + Clone> TransactionWrite for Value<V> {
-    fn extract_raw_bytes(&self) -> Option<Bytes> {
-        if self.0.is_none() {
-            None
-        } else {
-            let mut bytes = match self.0.clone().map(|v| v.into()) {
-                Some(v) => v,
-                None => vec![],
-            };
+    fn bytes(&self) -> Option<&Bytes> {
+        self.maybe_bytes.as_ref()
+    }
 
-            bytes.resize(16, 0);
-            Some(bytes.into())
-        }
+    fn from_state_value(_maybe_state_value: Option<StateValue>) -> Self {
+        unimplemented!("Irrelevant for the test")
     }
 
     fn as_state_value(&self) -> Option<StateValue> {
-        unimplemented!()
+        unimplemented!("Irrelevant for the test")
     }
 }
 
@@ -81,8 +89,8 @@ where
         let mut baseline: HashMap<K, BTreeMap<TxnIndex, Data<V>>> = HashMap::new();
         for (idx, (k, op)) in txns.iter().enumerate() {
             let value_to_update = match op {
-                Operator::Insert(v) => Data::Write(Value(Some(v.clone()))),
-                Operator::Remove => Data::Write(Value(None)),
+                Operator::Insert(v) => Data::Write(Value::new(Some(v.clone()))),
+                Operator::Remove => Data::Write(Value::new(None)),
                 Operator::Update(d) => Data::Delta(*d),
                 Operator::Read => continue,
             };
@@ -105,30 +113,30 @@ where
                     match data {
                         Data::Write(v) => match acc {
                             Some(d) => {
-                                let maybe_value =
-                                    AggregatorValue::from_write(v).map(|value| value.into());
-                                if maybe_value.is_none() {
-                                    // v must be a deletion.
-                                    assert!(matches!(v, Value(None)));
-                                    return ExpectedOutput::Deleted;
-                                }
-
-                                assert!(!failure); // acc should be none.
-
-                                match d.apply_to(maybe_value.unwrap()) {
-                                    Err(_) => return ExpectedOutput::Failure,
-                                    Ok(i) => return ExpectedOutput::Resolved(i),
+                                match v.as_u128().unwrap() {
+                                    Some(value) => {
+                                        assert!(!failure); // acc should be none.
+                                        match d.apply_to(value) {
+                                            Err(_) => return ExpectedOutput::Failure,
+                                            Ok(i) => return ExpectedOutput::Resolved(i),
+                                        }
+                                    },
+                                    None => {
+                                        // v must be a deletion.
+                                        assert_none!(v.bytes());
+                                        return ExpectedOutput::Deleted;
+                                    },
                                 }
                             },
-                            None => match v {
-                                Value(Some(w)) => {
+                            None => match v.maybe_value.as_ref() {
+                                Some(w) => {
                                     return if failure {
                                         ExpectedOutput::Failure
                                     } else {
                                         ExpectedOutput::Value(w.clone())
                                     };
                                 },
-                                Value(None) => return ExpectedOutput::Deleted,
+                                None => return ExpectedOutput::Deleted,
                             },
                         },
                         Data::Delta(d) => match acc.as_mut() {
@@ -191,7 +199,7 @@ where
 
     let baseline = Baseline::new(transactions.as_slice());
     // Only testing data, provide executable type ().
-    let map = MVHashMap::<KeyType<K>, Value<V>, ExecutableTestType>::new();
+    let map = MVHashMap::<KeyType<K>, usize, Value<V>, ExecutableTestType>::new();
 
     // make ESTIMATE placeholders for all versions to be updated.
     // allows to test that correct values appear at the end of concurrent execution.
@@ -207,7 +215,7 @@ where
         .collect::<Vec<_>>();
     for (key, idx) in versions_to_write {
         map.data()
-            .write(KeyType(key.clone()), (idx as TxnIndex, 0), Value(None));
+            .write(KeyType(key.clone()), idx as TxnIndex, 0, Value::new(None));
         map.data().mark_estimate(&KeyType(key), idx as TxnIndex);
     }
 
@@ -232,10 +240,13 @@ where
                         let baseline = baseline.get(key, idx as TxnIndex);
                         let mut retry_attempts = 0;
                         loop {
-                            match map.fetch_data(&KeyType(key.clone()), idx as TxnIndex) {
+                            match map
+                                .data()
+                                .fetch_data(&KeyType(key.clone()), idx as TxnIndex)
+                            {
                                 Ok(Versioned(_, v)) => {
-                                    match &*v {
-                                        Value(Some(w)) => {
+                                    match v.maybe_value.as_ref() {
+                                        Some(w) => {
                                             assert_eq!(
                                                 baseline,
                                                 ExpectedOutput::Value(w.clone()),
@@ -243,7 +254,7 @@ where
                                                 idx
                                             );
                                         },
-                                        Value(None) => {
+                                        None => {
                                             assert_eq!(
                                                 baseline,
                                                 ExpectedOutput::Deleted,
@@ -258,7 +269,7 @@ where
                                     assert_eq!(baseline, ExpectedOutput::Resolved(v), "{:?}", idx);
                                     break;
                                 },
-                                Err(NotFound) => {
+                                Err(Uninitialized) => {
                                     assert_eq!(baseline, ExpectedOutput::NotInMap, "{:?}", idx);
                                     break;
                                 },
@@ -285,18 +296,24 @@ where
                         }
                     },
                     Operator::Remove => {
-                        map.data()
-                            .write(KeyType(key.clone()), (idx as TxnIndex, 1), Value(None));
+                        map.data().write(
+                            KeyType(key.clone()),
+                            idx as TxnIndex,
+                            1,
+                            Value::new(None),
+                        );
                     },
                     Operator::Insert(v) => {
                         map.data().write(
                             KeyType(key.clone()),
-                            (idx as TxnIndex, 1),
-                            Value(Some(v.clone())),
+                            idx as TxnIndex,
+                            1,
+                            Value::new(Some(v.clone())),
                         );
                     },
                     Operator::Update(delta) => {
-                        map.add_delta(KeyType(key.clone()), idx as TxnIndex, *delta)
+                        map.data()
+                            .add_delta(KeyType(key.clone()), idx as TxnIndex, *delta)
                     },
                 }
             })

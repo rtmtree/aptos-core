@@ -168,14 +168,35 @@ impl WriteOp {
 }
 
 pub trait TransactionWrite {
-    fn extract_raw_bytes(&self) -> Option<Bytes>;
+    fn bytes(&self) -> Option<&Bytes>;
 
     fn as_state_value(&self) -> Option<StateValue>;
+
+    fn from_state_value(maybe_state_value: Option<StateValue>) -> Self;
+
+    fn extract_raw_bytes(&self) -> Option<Bytes> {
+        self.bytes().cloned()
+    }
+
+    fn bytes_len(&self) -> usize {
+        self.bytes().map(|bytes| bytes.len()).unwrap_or(0)
+    }
+
+    fn as_u128(&self) -> anyhow::Result<Option<u128>> {
+        match self.bytes() {
+            Some(bytes) => Ok(Some(bcs::from_bytes(bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn is_deletion(&self) -> bool {
+        self.bytes().is_some()
+    }
 }
 
 impl TransactionWrite for WriteOp {
-    fn extract_raw_bytes(&self) -> Option<Bytes> {
-        self.bytes().cloned()
+    fn bytes(&self) -> Option<&Bytes> {
+        self.bytes()
     }
 
     fn as_state_value(&self) -> Option<StateValue> {
@@ -183,6 +204,17 @@ impl TransactionWrite for WriteOp {
             None => StateValue::new_legacy(bytes.clone()),
             Some(metadata) => StateValue::new_with_metadata(bytes.clone(), metadata.clone()),
         })
+    }
+
+    fn from_state_value(maybe_state_value: Option<StateValue>) -> Self {
+        match maybe_state_value.map(|state_value| state_value.into()) {
+            None => WriteOp::Deletion,
+            Some((None, bytes)) => WriteOp::Creation(bytes),
+            Some((Some(metadata), bytes)) => WriteOp::CreationWithMetadata {
+                data: bytes,
+                metadata,
+            },
+        }
     }
 }
 

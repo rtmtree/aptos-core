@@ -9,7 +9,7 @@ use aptos_types::state_store::{
     state_value::{StateValue, StateValueMetadataKind},
 };
 use bytes::Bytes;
-use move_core_types::{language_storage::StructTag, value::MoveTypeLayout};
+use move_core_types::value::MoveTypeLayout;
 
 /// Allows to query resources from the state.
 pub trait TResourceView {
@@ -51,9 +51,55 @@ pub trait TResourceView {
     }
 }
 
-pub trait ResourceResolver: TResourceView<Key = StateKey, Layout = MoveTypeLayout> {}
+pub trait TResourceGroupView {
+    type Key;
+    type Tag;
 
-impl<T: TResourceView<Key = StateKey, Layout = MoveTypeLayout>> ResourceResolver for T {}
+    fn get_resource_from_group(
+        &self,
+        _key: &Self::Key,
+        _resource_tag: &Self::Tag,
+        _return_group_size: bool,
+    ) -> anyhow::Result<(Option<Bytes>, Option<u64>)> {
+        unimplemented!("TResourceGroupView not yet implemented");
+    }
+
+    /// Implements the functionality requested by get_resource_group_state_value_metadata
+    /// from StateValueMetadataResolver, which on top of StateValueMetadataKind, requires
+    /// a speculative size of the resource group before the transaction.
+    fn get_resource_group_state_value_metadata(
+        &self,
+        _state_key: &Self::Key,
+    ) -> anyhow::Result<Option<(StateValueMetadataKind, u64)>> {
+        unimplemented!("TResourceGroupView not yet implemented");
+    }
+
+    fn resource_group_exists(&self, _key: &Self::Key) -> anyhow::Result<bool> {
+        unimplemented!("TResourceGroupView not yet implemented");
+    }
+
+    /// Needed for backwards compatibility with the additional safety mechanism for resource
+    /// groups, where the violation of the following invariant causes transaction failure:
+    /// - if a resource is modified or deleted it must already exist within a group,
+    /// and if it is created, it must not previously exist.
+    ///
+    /// For normal resources, this is asserted, but for resource groups the behavior (that
+    /// we maintain) is for the transaction to fail with INVARIANT_VIOLATION_ERROR.
+    /// This ensures state does not change and blockchain does not halt while the underlying
+    /// issue is addressed. In order to maintain the behavior we check for resource existence,
+    /// which in the context of parallel execution does not cause a full R/W conflict.
+    ///
+    /// Note: If and when we start using the method in other use-cases, in particular, if it
+    /// may access a resource group for the first time, we should also incorporate the size
+    /// charge for such access.
+    fn resource_exists_in_group(
+        &self,
+        _key: &Self::Key,
+        _resource_tag: &Self::Tag,
+    ) -> anyhow::Result<bool> {
+        unimplemented!("TResourceGroupView not yet implemented");
+    }
+}
 
 /// Allows to query modules from the state.
 pub trait TModuleView {
@@ -84,10 +130,6 @@ pub trait TModuleView {
     }
 }
 
-pub trait ModuleResolver: TModuleView<Key = StateKey> {}
-
-impl<T: TModuleView<Key = StateKey>> ModuleResolver for T {}
-
 /// Allows to query state information, e.g. its usage.
 pub trait StateStorageView {
     fn id(&self) -> StateViewId;
@@ -112,14 +154,16 @@ pub trait StateStorageView {
 ///   conversion from state to executor view is needed, an adapter can be used.
 pub trait TExecutorView<K, L, I>:
     TResourceView<Key = K, Layout = L>
+    // + TResourceGroupView<Key = K, Tag = T>
     + TModuleView<Key = K>
     + TAggregatorView<IdentifierV1 = K, IdentifierV2 = I>
     + StateStorageView
 {
 }
 
-impl<T, K, L, I> TExecutorView<K, L, I> for T where
-    T: TResourceView<Key = K, Layout = L>
+impl<A, K, L, I> TExecutorView<K, L, I> for A where
+    A: TResourceView<Key = K, Layout = L>
+        // + TResourceGroupView<Key = K, Tag = T>
         + TModuleView<Key = K>
         + TAggregatorView<IdentifierV1 = K, IdentifierV2 = I>
         + StateStorageView
@@ -131,6 +175,11 @@ pub trait ExecutorView: TExecutorView<StateKey, MoveTypeLayout, AggregatorID> {}
 impl<T> ExecutorView for T where T: TExecutorView<StateKey, MoveTypeLayout, AggregatorID> {}
 
 /// Allows to query storage metadata in the VM session. Needed for storage refunds.
+/// - Result being Err means storage error or some incostistency (e.g. during speculation,
+/// needing to abort/halt the transaction with an error status).
+/// - Ok(None) means that the corresponding data does not exist / was deleted.
+/// - Ok(Some(_ : MetadataKind)) may be internally None (within Kind) if the metadata was
+/// not previously provided (e.g. Legacy WriteOps).
 pub trait StateValueMetadataResolver {
     fn get_module_state_value_metadata(
         &self,
@@ -141,43 +190,21 @@ pub trait StateValueMetadataResolver {
         &self,
         state_key: &StateKey,
     ) -> anyhow::Result<Option<StateValueMetadataKind>>;
-}
 
-pub trait TResourceGroupResolver {
-    type Key;
-    type Tag;
-
-    fn get_resource_from_group(
-        &self,
-        key: &Self::Key,
-        resource_tag: &Self::Tag,
-        return_group_size: bool,
-    ) -> anyhow::Result<(Option<Bytes>, Option<usize>)>;
-
-    /// Needed for backwards compatibility with the additional safety mechanism for resource
-    /// groups, where the violation of the following invariant causes transaction failure:
-    /// - if a resource is modified or deleted it must already exist within a group,
-    /// and if it is created, it must not previously exist.
+    /// u64 provided alongside StateValueMetadataKind is a (speculative) size of the
+    /// group before the transaction. The size is collected based on atomic reads, but
+    /// is only guaranteed to correspond to the correct size if executing on a quiescent,
+    /// correct state. The provided value can be viewed as a branch prediction in the
+    /// parallel executor setting, as a wrong value will be (later) caught by validation.
     ///
-    /// For normal resources, this is asserted, but for resource groups the behavior (that
-    /// we maintain) is for the transaction to fail with INVARIANT_VIOLATION_ERROR.
-    /// This ensures state does not change and blockchain does not halt while the underlying
-    /// issue is addressed. In order to maintain the behavior we check for resource existence,
-    /// which in the context of parallel execution does not cause a full R/W conflict.
-    ///
-    /// Note: If and when we start using the method in other use-cases, in particular, if it
-    /// may access a resource group for the first time, we should also incorporate the size
-    /// charge for such access.
-    fn resource_exists_in_group(
+    /// This size is used to compute the size of the resource group at the end of the
+    /// transaction, required for storage gas fee charging. Thus, in parallel execution,
+    /// this will lead to a deterministic estimate (based on a validated state) of the
+    /// value that can be used for the gas purposes. Thus, R/W conflicts are avoided
+    /// in parallel execution, as long as the estimates are correct (e.g. updating struct
+    /// members of a fixed size).
+    fn get_resource_group_state_value_metadata(
         &self,
-        key: &Self::Key,
-        resource_tag: &Self::Tag,
-    ) -> anyhow::Result<bool> {
-        self.get_resource_from_group(key, resource_tag, false)
-            .map(|(res, _)| res.is_some())
-    }
+        state_key: &StateKey,
+    ) -> anyhow::Result<Option<(StateValueMetadataKind, u64)>>;
 }
-
-pub trait ResourceGroupResolver: TResourceGroupResolver<Key = StateKey, Tag = StructTag> {}
-
-impl<T: TResourceGroupResolver<Key = StateKey, Tag = StructTag>> ResourceGroupResolver for T {}
