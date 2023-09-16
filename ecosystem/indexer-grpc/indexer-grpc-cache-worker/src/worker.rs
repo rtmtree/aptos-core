@@ -62,8 +62,11 @@ impl Worker {
         redis_main_instance_address: String,
         file_store: IndexerGrpcFileStoreConfig,
     ) -> Self {
-        let redis_client = redis::Client::open(format!("redis://{}", redis_main_instance_address))
-            .expect("Create redis client failed.");
+        let address = format!("redis://{}", redis_main_instance_address);
+        let redis_client = redis::Client::open(address.clone()).expect(&format!(
+            "Create redis client failed for address {}",
+            address
+        ));
         Self {
             redis_client,
             file_store,
@@ -82,13 +85,16 @@ impl Worker {
     pub async fn run(&mut self) {
         // Re-connect if lost.
         loop {
+            eprintln!("yooooooo1");
             let conn = self
                 .redis_client
                 .get_tokio_connection_manager()
                 .await
                 .expect("Get redis connection failed.");
+            eprintln!("yooooooo2");
             let mut rpc_client = create_grpc_client(self.fullnode_grpc_address.clone()).await;
 
+            eprintln!("yooooooo3");
             // 1. Fetch metadata.
             let file_store_operator: Box<dyn FileStoreOperator> = match &self.file_store {
                 IndexerGrpcFileStoreConfig::GcsFileStore(gcs_file_store) => {
@@ -104,6 +110,7 @@ impl Worker {
                 ),
             };
 
+            eprintln!("yooooooo4");
             file_store_operator.verify_storage_bucket_existence().await;
             let starting_version = file_store_operator
                 .get_starting_version()
@@ -117,12 +124,14 @@ impl Worker {
                 starting_version: Some(starting_version),
                 ..Default::default()
             });
+            eprintln!("yooooooo5");
 
             let response = rpc_client
                 .get_transactions_from_node(request)
                 .await
                 .unwrap();
 
+            eprintln!("yooooooo6");
             // 3&4. Infinite streaming until error happens. Either stream ends or worker crashes.
             process_streaming_response(conn, file_store_metadata, response.into_inner()).await;
         }

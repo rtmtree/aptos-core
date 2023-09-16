@@ -12,6 +12,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+pub const SERVER_NAME: &str = "idxpostproc";
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexerGrpcPFNCheckerConfig {
@@ -93,7 +95,7 @@ impl RunnableConfig for IndexerGrpcPostProcessorConfig {
     }
 
     fn get_server_name(&self) -> String {
-        "idxbg".to_string()
+        SERVER_NAME.to_string()
     }
 }
 

@@ -43,6 +43,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use url::Url;
 
+pub const SERVER_NAME: &str = "idxnftcrawl";
+
 /// Structs to hold config from YAML
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -316,7 +318,7 @@ impl RunnableConfig for ParserConfig {
     }
 
     fn get_server_name(&self) -> String {
-        "parser".to_string()
+        SERVER_NAME.to_string()
     }
 }
 

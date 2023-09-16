@@ -386,6 +386,7 @@ pub fn convert_write_set_change(change: &WriteSetChange) -> transaction::WriteSe
             )),
         },
         WriteSetChange::WriteTableItem(write_table_item) => {
+            //eprintln!("write_table_item: {:#?}", write_table_item);
             let data = write_table_item.data.as_ref().unwrap_or_else(|| {
                 panic!(
                     "Could not extract data from DecodedTableData '{:?}'",
@@ -650,6 +651,8 @@ pub fn convert_transaction(
     epoch: u64,
 ) -> transaction::Transaction {
     let mut timestamp: Option<timestamp::Timestamp> = None;
+
+    // eprintln!("txn: {:#?}", transaction);
 
     let txn_type = match transaction {
         Transaction::UserTransaction(_) => transaction::transaction::TransactionType::User,

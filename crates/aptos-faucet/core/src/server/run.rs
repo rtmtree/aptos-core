@@ -48,7 +48,7 @@ pub struct HandlerConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RunConfig {
     /// API server config.
-    server_config: ServerConfig,
+    pub server_config: ServerConfig,
 
     /// Metrics server config.
     metrics_server_config: MetricsServerConfig,

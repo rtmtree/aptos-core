@@ -4,8 +4,10 @@
 use crate::config::{
     config_sanitizer::ConfigSanitizer, node_config_loader::NodeType, Error, NodeConfig,
 };
+use anyhow::Context;
 use aptos_types::chain_id::ChainId;
 use serde::{Deserialize, Serialize};
+use std::net::ToSocketAddrs;
 
 // Useful indexer defaults
 const DEFAULT_ADDRESS: &str = "0.0.0.0:50051";
@@ -14,55 +16,87 @@ const DEFAULT_PROCESSOR_BATCH_SIZE: u16 = 1000;
 const DEFAULT_PROCESSOR_TASK_COUNT: u16 = 20;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct IndexerGrpcConfig {
     pub enabled: bool,
 
     /// The address that the grpc server will listen on
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<String>,
+    #[serde(default = "IndexerGrpcConfig::default_address")]
+    pub address: String,
 
     /// Number of processor tasks to fan out
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub processor_task_count: Option<u16>,
+    #[serde(default = "IndexerGrpcConfig::default_processor_task_count")]
+    pub processor_task_count: u16,
 
     /// Number of transactions each processor will process
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub processor_batch_size: Option<u16>,
+    #[serde(default = "IndexerGrpcConfig::default_processor_batch_size")]
+    pub processor_batch_size: u16,
 
     /// Number of transactions returned in a single stream response
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_batch_size: Option<u16>,
+    #[serde(default = "IndexerGrpcConfig::default_output_batch_size")]
+    pub output_batch_size: u16,
 }
 
+impl IndexerGrpcConfig {
+    fn default_address() -> String {
+        DEFAULT_ADDRESS.into()
+    }
+
+    fn default_processor_task_count() -> u16 {
+        DEFAULT_PROCESSOR_TASK_COUNT
+    }
+
+    fn default_processor_batch_size() -> u16 {
+        DEFAULT_PROCESSOR_BATCH_SIZE
+    }
+
+    fn default_output_batch_size() -> u16 {
+        DEFAULT_OUTPUT_BATCH_SIZE
+    }
+}
+
+// I see, so the reason we have all this default handling in the ConfigSanitizer is
+// because we don't even use the Default or serde::default stuff, even if it is here,
+// because we start with a config from a file, at least in the testing case...
+// what a mess, why do we define it in a file... we should should just use Config::default()
+// and then make changes to it in code.
+// https://aptos-org.slack.com/archives/C03F71PU3B5/p1694699525458539
 impl ConfigSanitizer for IndexerGrpcConfig {
     fn sanitize(
         node_config: &mut NodeConfig,
         _node_type: NodeType,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
-        let indexer_grpc_config = &mut node_config.indexer_grpc;
+        node_config.indexer_grpc.address = DEFAULT_ADDRESS.into();
+        node_config.indexer_grpc.processor_task_count = DEFAULT_PROCESSOR_TASK_COUNT;
+        node_config.indexer_grpc.processor_batch_size = DEFAULT_PROCESSOR_BATCH_SIZE;
+        node_config.indexer_grpc.output_batch_size = DEFAULT_OUTPUT_BATCH_SIZE;
 
-        // If the indexer is not enabled, we don't need to do anything
-        if !indexer_grpc_config.enabled {
-            return Ok(());
-        }
+        // TODO I don't want to have to do any of that ^^^^^
+        // https://aptos-org.slack.com/archives/C03F71PU3B5/p1694699525458539
 
-        // Set appropriate defaults
-        indexer_grpc_config.address = indexer_grpc_config
+        // Make sure the address can be converted to SocketAddrs.
+        node_config
+            .indexer_grpc
             .address
-            .clone()
-            .or_else(|| Some(DEFAULT_ADDRESS.into()));
-        indexer_grpc_config.processor_task_count = indexer_grpc_config
-            .processor_task_count
-            .or(Some(DEFAULT_PROCESSOR_TASK_COUNT));
-        indexer_grpc_config.processor_batch_size = indexer_grpc_config
-            .processor_batch_size
-            .or(Some(DEFAULT_PROCESSOR_BATCH_SIZE));
-        indexer_grpc_config.output_batch_size = indexer_grpc_config
-            .output_batch_size
-            .or(Some(DEFAULT_OUTPUT_BATCH_SIZE));
-
+            .to_socket_addrs()
+            .with_context(||
+                format!(
+                    "Listen address for indexer GRPC node stream ({}) could not be parsed as SocketAddrs",
+                    node_config
+                        .indexer_grpc
+                        .address
+                )
+            )?
+            .next()
+            .with_context(||
+                format!(
+                "Failed to parse indexer GRPC node stream ({}) listen address",
+                node_config
+                    .indexer_grpc
+                    .address
+                )
+            )?;
         Ok(())
     }
 }

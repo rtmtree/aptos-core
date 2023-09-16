@@ -5,6 +5,9 @@
 **/*.rs.bk
 .idea/
 
+# Ignore files from running local testnets
+**/*.rdb
+
 # Ignore wallet mnemonic files used for deterministic key derivation
 *.mnemonic
 

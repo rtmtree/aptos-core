@@ -24,7 +24,7 @@ impl ServerArgs {
         C: RunnableConfig,
     {
         // Set up the server.
-        setup_logging();
+        setup_logging(None);
         setup_panic_handler();
         let config = load::<GenericConfig<C>>(&self.config_path)?;
         run_server_with_config(config).await
@@ -134,19 +134,25 @@ fn handle_panic(panic_info: &PanicInfo<'_>) {
 }
 
 /// Set up logging for the server.
-pub fn setup_logging() {
+/// TODO add a comment explaining this writer thing
+pub fn setup_logging(make_writer: Option<Box<dyn Fn() -> Box<dyn std::io::Write> + Send + Sync>>) {
     let env_filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap();
-    tracing_subscriber::fmt()
+
+    let subscriber = tracing_subscriber::fmt()
         .json()
         .with_file(true)
         .with_line_number(true)
         .with_thread_ids(true)
         .with_target(false)
         .with_thread_names(true)
-        .with_env_filter(env_filter)
-        .init();
+        .with_env_filter(env_filter);
+
+    match make_writer {
+        Some(w) => subscriber.with_writer(w).init(),
+        None => subscriber.init(),
+    }
 }
 
 /// Register readiness and liveness probes and set up metrics endpoint.
@@ -168,6 +174,7 @@ async fn register_probes_and_metrics_handler(port: u16) {
             .header("Content-Type", "text/plain")
             .body(encode_buffer)
     });
+    eprintln!("Starting to listen on port {}", port);
     warp::serve(readiness.or(metrics_endpoint))
         .run(([0, 0, 0, 0], port))
         .await;

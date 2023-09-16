@@ -33,6 +33,13 @@ aptos-global-constants = { workspace = true }
 aptos-keygen = { workspace = true }
 aptos-ledger = { workspace = true }
 aptos-logger = { workspace = true }
+redis = {workspace = true}
+aptos-indexer-grpc-cache-worker = { workspace = true }
+aptos-indexer-grpc-file-store = { workspace = true }
+aptos-indexer-grpc-data-service = { workspace = true }
+aptos-indexer-grpc-utils = { workspace = true }
+processor = { git = "https://github.com/aptos-labs/aptos-indexer-processors.git", branch = "banool/use-from-cli" }
+aptos-indexer-grpc-server-framework = { workspace = true }
 aptos-network-checker = { workspace = true }
 aptos-node = { workspace = true }
 aptos-rest-client = { workspace = true }
@@ -44,6 +51,8 @@ aptos-transactional-test-harness = { workspace = true }
 aptos-types = { workspace = true }
 aptos-vm = { workspace = true, features = ["testing"] }
 aptos-vm-genesis = { workspace = true }
+tracing-core = { version = "0.1.31" }
+tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bcs = { workspace = true }

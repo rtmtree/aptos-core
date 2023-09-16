@@ -55,10 +55,10 @@ pub fn bootstrap(
     let node_config = config.clone();
 
     // We have defaults for these so they should all return something nonnull so unwrap is safe here
-    let processor_task_count = node_config.indexer_grpc.processor_task_count.unwrap();
-    let processor_batch_size = node_config.indexer_grpc.processor_batch_size.unwrap();
-    let output_batch_size = node_config.indexer_grpc.output_batch_size.unwrap();
-    let address = node_config.indexer_grpc.address.clone().unwrap();
+    let processor_task_count = node_config.indexer_grpc.processor_task_count;
+    let processor_batch_size = node_config.indexer_grpc.processor_batch_size;
+    let output_batch_size = node_config.indexer_grpc.output_batch_size;
+    let address = node_config.indexer_grpc.address.clone();
 
     runtime.spawn(async move {
         let context = Arc::new(Context::new(chain_id, db, mp_sender, node_config));

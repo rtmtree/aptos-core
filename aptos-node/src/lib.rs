@@ -123,6 +123,7 @@ impl AptosNodeArgs {
             setup_test_environment_and_start_node(
                 self.config,
                 self.test_config_override,
+                None,
                 self.test_dir,
                 self.random_ports,
                 self.lazy,
@@ -226,6 +227,7 @@ pub fn start(
 pub fn setup_test_environment_and_start_node<R>(
     config_path: Option<PathBuf>,
     test_config_override_path: Option<PathBuf>,
+    config: Option<NodeConfig>,
     test_dir: Option<PathBuf>,
     random_ports: bool,
     enable_lazy_mode: bool,
@@ -244,50 +246,26 @@ where
     let test_dir = test_dir.canonicalize()?;
 
     // The validator builder puts the first node in the 0 directory
-    let validator_config_path = test_dir.join("0").join("node.yaml");
+    let validator_config_path = test_dir.join("node").join("config.yaml");
     let aptos_root_key_path = test_dir.join("mint.key");
 
     // If there's already a config, use it. Otherwise create a test one.
-    let config = if validator_config_path.exists() {
+    let config = if let Some(config) = config {
+        config
+    } else if validator_config_path.exists() {
         NodeConfig::load_from_path(&validator_config_path)
             .map_err(|error| anyhow!("Unable to load config: {:?}", error))?
     } else {
-        // Create a test only config for a single validator node
-        let node_config = create_single_node_test_config(
-            config_path.clone(),
-            test_config_override_path.clone(),
+        // Create a test only config for a single validator node.
+        create_single_node_test_config(
+            &config_path,
+            &test_config_override_path,
+            &test_dir,
+            random_ports,
             enable_lazy_mode,
-        )?;
-
-        // Build genesis and the validator node
-        let builder = aptos_genesis::builder::Builder::new(&test_dir, framework.clone())?
-            .with_init_config(Some(Arc::new(move |_, config, _| {
-                *config = node_config.clone();
-            })))
-            .with_init_genesis_config(Some(Arc::new(|genesis_config| {
-                genesis_config.allow_new_validators = true;
-                genesis_config.epoch_duration_secs = EPOCH_LENGTH_SECS;
-                genesis_config.recurring_lockup_duration_secs = 7200;
-            })))
-            .with_randomize_first_validator_ports(random_ports);
-        let (root_key, _genesis, genesis_waypoint, mut validators) = builder.build(rng)?;
-
-        // Write the mint key to disk
-        let serialized_keys = bcs::to_bytes(&root_key)?;
-        let mut key_file = fs::File::create(&aptos_root_key_path)?;
-        key_file.write_all(&serialized_keys)?;
-
-        // Build a waypoint file so that clients / docker can grab it easily
-        let waypoint_file_path = test_dir.join("waypoint.txt");
-        Write::write_all(
-            &mut fs::File::create(waypoint_file_path)?,
-            genesis_waypoint.to_string().as_bytes(),
-        )?;
-
-        aptos_config::config::sanitize_node_config(&mut validators[0].config)?;
-
-        // Return the validator config
-        validators[0].config.clone()
+            framework,
+            rng,
+        )?
     };
 
     // Prepare log file since we cannot automatically route logs to stderr
@@ -322,9 +300,10 @@ where
         &config.full_node_networks[0].listen_address
     );
     if config.indexer_grpc.enabled {
-        if let Some(ref indexer_grpc_address) = config.indexer_grpc.address {
-            println!("\tIndexer gRPC endpoint: {}", indexer_grpc_address);
-        }
+        println!(
+            "\tIndexer gRPC node stream endpoint: {}",
+            config.indexer_grpc.address
+        );
     }
     if enable_lazy_mode {
         println!("\tLazy mode is enabled");
@@ -334,13 +313,22 @@ where
     start(config, Some(log_file), false)
 }
 
+// TODO: Update this comment. I think moving all the config generation logic into
+// this function makes abundant sense, it didn't belong in the previous function.
 /// Creates a single node test config, with a few config tweaks to reduce
 /// the overhead of running the node on a local machine.
-fn create_single_node_test_config(
-    config_path: Option<PathBuf>,
-    test_config_override_path: Option<PathBuf>,
+pub fn create_single_node_test_config<R>(
+    config_path: &Option<PathBuf>,
+    test_config_override_path: &Option<PathBuf>,
+    test_dir: &PathBuf,
+    random_ports: bool,
     enable_lazy_mode: bool,
-) -> anyhow::Result<NodeConfig> {
+    framework: &ReleaseBundle,
+    rng: R,
+) -> anyhow::Result<NodeConfig>
+where
+    R: rand::RngCore + rand::CryptoRng,
+{
     let mut node_config = match test_config_override_path {
         // If a config override path was provided, merge it with the default config
         Some(test_config_override_path) => {
@@ -354,6 +342,7 @@ fn create_single_node_test_config(
                     )
                 })?
                 .read_to_string(&mut contents)?;
+            // todo: Consider just using from_reader here.
             let values = serde_yaml::from_str::<serde_yaml::Value>(&contents).map_err(|e| {
                 anyhow!(
                     "Unable to read config override file as YAML {:?}. Error: {}",
@@ -449,6 +438,38 @@ fn create_single_node_test_config(
     if enable_lazy_mode {
         node_config.consensus.quorum_store_poll_time_ms = 3_600_000;
     }
+
+    // The validator builder puts the first node in the 0 directory
+    let aptos_root_key_path = test_dir.join("mint.key");
+
+    // Build genesis and the validator node
+    let builder = aptos_genesis::builder::Builder::new(&test_dir, framework.clone())?
+        .with_init_config(Some(Arc::new(move |_, config, _| {
+            *config = node_config.clone();
+        })))
+        .with_init_genesis_config(Some(Arc::new(|genesis_config| {
+            genesis_config.allow_new_validators = true;
+            genesis_config.epoch_duration_secs = EPOCH_LENGTH_SECS;
+            genesis_config.recurring_lockup_duration_secs = 7200;
+        })))
+        .with_randomize_first_validator_ports(random_ports);
+    let (root_key, _genesis, genesis_waypoint, mut validators) = builder.build(rng)?;
+
+    // Write the mint key to disk
+    let serialized_keys = bcs::to_bytes(&root_key)?;
+    let mut key_file = fs::File::create(&aptos_root_key_path)?;
+    key_file.write_all(&serialized_keys)?;
+
+    // Build a waypoint file so that clients / docker can grab it easily
+    let waypoint_file_path = test_dir.join("waypoint.txt");
+    Write::write_all(
+        &mut fs::File::create(waypoint_file_path)?,
+        genesis_waypoint.to_string().as_bytes(),
+    )?;
+
+    aptos_config::config::sanitize_node_config(&mut validators[0].config)?;
+
+    let node_config = validators[0].config.clone();
 
     Ok(node_config)
 }

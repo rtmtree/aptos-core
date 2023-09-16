@@ -10,6 +10,8 @@ use aptos_indexer_grpc_utils::config::IndexerGrpcFileStoreConfig;
 use processor::Processor;
 use serde::{Deserialize, Serialize};
 
+pub const SERVER_NAME: &str = "idxfilestore";
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexerGrpcFileStoreWorkerConfig {
@@ -29,6 +31,6 @@ impl RunnableConfig for IndexerGrpcFileStoreWorkerConfig {
     }
 
     fn get_server_name(&self) -> String {
-        "idxfile".to_string()
+        SERVER_NAME.to_string()
     }
 }

@@ -16,6 +16,7 @@ pub type GrpcClientType = FullnodeDataClient<tonic::transport::Channel>;
 
 /// Create a gRPC client with exponential backoff.
 pub async fn create_grpc_client(address: String) -> GrpcClientType {
+    // TODO: This keeps retrying for far too long.
     backoff::future::retry(backoff::ExponentialBackoff::default(), || async {
         match FullnodeDataClient::connect(address.clone()).await {
             Ok(client) => {
