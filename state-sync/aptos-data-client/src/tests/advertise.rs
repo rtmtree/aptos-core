@@ -5,6 +5,7 @@ use crate::{
     error::Error,
     interface::AptosDataClientInterface,
     peer_states::calculate_optimal_chunk_sizes,
+    poller,
     tests::{mock::MockNetwork, utils},
 };
 use aptos_config::config::AptosDataClientConfig;
@@ -19,13 +20,16 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn request_works_only_when_data_available() {
-    ::aptos_logger::Logger::init_for_testing();
-    let (mut mock_network, mock_time, client, poller) = MockNetwork::new(None, None, None);
+    // Create the mock network, client and poller
+    let data_client_config = AptosDataClientConfig::default();
+    let (mut mock_network, mock_time, client, poller) =
+        MockNetwork::new(None, Some(data_client_config), None);
 
-    tokio::spawn(poller.start_poller());
+    // Start the poller
+    tokio::spawn(poller::start_poller(poller));
 
     // This request should fail because no peers are currently connected
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     let error = client
         .get_transactions_with_proof(100, 50, 100, false, request_timeout)
         .await
@@ -44,10 +48,15 @@ async fn request_works_only_when_data_available() {
     assert_matches!(error, Error::DataIsUnavailable(_));
 
     // Advance time so the poller sends a data summary request
-    tokio::task::yield_now().await;
-    mock_time.advance_async(Duration::from_millis(1_000)).await;
+    let poll_loop_interval_ms = data_client_config.data_poller_config.poll_loop_interval_ms;
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
+    }
 
-    // Receive their request and fulfill it
+    // Verify the received network request
     let network_request = mock_network.next_request().await.unwrap();
     assert_eq!(network_request.peer_network_id, expected_peer);
     assert_eq!(network_request.protocol_id, ProtocolId::StorageServiceRpc);
@@ -57,6 +66,7 @@ async fn request_works_only_when_data_available() {
         DataRequest::GetStorageServerSummary
     );
 
+    // Fulfill the request
     let summary = utils::create_storage_summary(200);
     let data_response = DataResponse::StorageServerSummary(summary);
     network_request
@@ -68,8 +78,8 @@ async fn request_works_only_when_data_available() {
 
     // Handle the client's transactions request
     tokio::spawn(async move {
+        // Verify the received network request
         let network_request = mock_network.next_request().await.unwrap();
-
         assert_eq!(network_request.peer_network_id, expected_peer);
         assert_eq!(network_request.protocol_id, ProtocolId::StorageServiceRpc);
         assert!(network_request.storage_service_request.use_compression);
@@ -83,6 +93,7 @@ async fn request_works_only_when_data_available() {
             })
         );
 
+        // Fulfill the request
         let data_response =
             DataResponse::TransactionsWithProof(TransactionListWithProof::new_empty());
         network_request

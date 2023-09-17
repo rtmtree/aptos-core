@@ -26,9 +26,12 @@ aptos-storage-service-client = { workspace = true }
 aptos-storage-service-types = { workspace = true }
 aptos-time-service = { workspace = true }
 aptos-types = { workspace = true }
+arc-swap = { workspace = true }
 async-trait = { workspace = true }
+dashmap = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
+maplit = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
@@ -45,4 +48,5 @@ bcs = { workspace = true }
 claims = { workspace = true }
 maplit = { workspace = true }
 mockall = { workspace = true }
+aptos-peer-monitoring-service-types = { workspace = true }
 tokio = { workspace = true }

@@ -4,6 +4,7 @@
 use crate::{
     error::Error,
     interface::AptosDataClientInterface,
+    poller,
     tests::{mock::MockNetwork, utils},
 };
 use aptos_config::config::AptosDataClientConfig;
@@ -18,8 +19,6 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn compression_mismatch_disabled() {
-    ::aptos_logger::Logger::init_for_testing();
-
     // Disable compression
     let data_client_config = AptosDataClientConfig {
         use_compression: false,
@@ -28,14 +27,20 @@ async fn compression_mismatch_disabled() {
     let (mut mock_network, mock_time, client, poller) =
         MockNetwork::new(None, Some(data_client_config), None);
 
-    tokio::spawn(poller.start_poller());
+    // Start the poller
+    tokio::spawn(poller::start_poller(poller));
 
     // Add a connected peer
     let _ = mock_network.add_peer(true);
 
     // Advance time so the poller sends a data summary request
-    tokio::task::yield_now().await;
-    mock_time.advance_async(Duration::from_millis(1_000)).await;
+    let poll_loop_interval_ms = data_client_config.data_poller_config.poll_loop_interval_ms;
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
+    }
 
     // Receive their request and respond
     let network_request = mock_network.next_request().await.unwrap();
@@ -60,7 +65,7 @@ async fn compression_mismatch_disabled() {
     });
 
     // The client should receive a compressed response and return an error
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     let response = client
         .get_transactions_with_proof(100, 50, 100, false, request_timeout)
         .await
@@ -70,8 +75,6 @@ async fn compression_mismatch_disabled() {
 
 #[tokio::test]
 async fn compression_mismatch_enabled() {
-    ::aptos_logger::Logger::init_for_testing();
-
     // Enable compression
     let data_client_config = AptosDataClientConfig {
         use_compression: true,
@@ -80,14 +83,20 @@ async fn compression_mismatch_enabled() {
     let (mut mock_network, mock_time, client, poller) =
         MockNetwork::new(None, Some(data_client_config), None);
 
-    tokio::spawn(poller.start_poller());
+    // Start the poller
+    tokio::spawn(poller::start_poller(poller));
 
     // Add a connected peer
     let _ = mock_network.add_peer(true);
 
     // Advance time so the poller sends a data summary request
-    tokio::task::yield_now().await;
-    mock_time.advance_async(Duration::from_millis(1_000)).await;
+    let poll_loop_interval_ms = data_client_config.data_poller_config.poll_loop_interval_ms;
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
+    }
 
     // Receive their request and respond
     let network_request = mock_network.next_request().await.unwrap();
@@ -112,7 +121,7 @@ async fn compression_mismatch_enabled() {
     });
 
     // The client should receive a compressed response and return an error
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     let response = client
         .get_transactions_with_proof(100, 50, 100, false, request_timeout)
         .await
@@ -122,8 +131,6 @@ async fn compression_mismatch_enabled() {
 
 #[tokio::test]
 async fn disable_compression() {
-    ::aptos_logger::Logger::init_for_testing();
-
     // Disable compression
     let data_client_config = AptosDataClientConfig {
         use_compression: false,
@@ -132,16 +139,22 @@ async fn disable_compression() {
     let (mut mock_network, mock_time, client, poller) =
         MockNetwork::new(None, Some(data_client_config), None);
 
-    tokio::spawn(poller.start_poller());
+    // Start the poller
+    tokio::spawn(poller::start_poller(poller));
 
     // Add a connected peer
     let expected_peer = mock_network.add_peer(true);
 
     // Advance time so the poller sends a data summary request
-    tokio::task::yield_now().await;
-    mock_time.advance_async(Duration::from_millis(1_000)).await;
+    let poll_loop_interval_ms = data_client_config.data_poller_config.poll_loop_interval_ms;
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
+    }
 
-    // Receive their request
+    // Verify the received network request
     let network_request = mock_network.next_request().await.unwrap();
     assert_eq!(network_request.peer_network_id, expected_peer);
     assert_eq!(network_request.protocol_id, ProtocolId::StorageServiceRpc);
@@ -162,8 +175,8 @@ async fn disable_compression() {
 
     // Handle the client's transactions request
     tokio::spawn(async move {
+        // Verify the received network request
         let network_request = mock_network.next_request().await.unwrap();
-
         assert_eq!(network_request.peer_network_id, expected_peer);
         assert_eq!(network_request.protocol_id, ProtocolId::StorageServiceRpc);
         assert!(!network_request.storage_service_request.use_compression);
@@ -177,6 +190,7 @@ async fn disable_compression() {
             })
         );
 
+        // Fulfill the request
         let data_response =
             DataResponse::TransactionsWithProof(TransactionListWithProof::new_empty());
         let storage_response = StorageServiceResponse::new(data_response, false).unwrap();
@@ -185,7 +199,7 @@ async fn disable_compression() {
 
     // The client's request should succeed since a peer finally has advertised
     // data for this range.
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     let response = client
         .get_transactions_with_proof(100, 50, 100, false, request_timeout)
         .await
