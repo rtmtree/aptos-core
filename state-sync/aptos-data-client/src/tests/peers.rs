@@ -5,10 +5,11 @@ use crate::{
     client::AptosDataClient,
     error::Error,
     interface::AptosDataClientInterface,
-    poller::poll_peer,
+    poller,
+    poller::{poll_peer, DataSummaryPoller},
     tests::{mock::MockNetwork, utils},
 };
-use aptos_config::network_id::PeerNetworkId;
+use aptos_config::{config::AptosDataClientConfig, network_id::PeerNetworkId};
 use aptos_storage_service_types::{
     requests::DataRequest,
     responses::{CompleteDataRange, DataResponse, StorageServerSummary, StorageServiceResponse},
@@ -16,12 +17,14 @@ use aptos_storage_service_types::{
 };
 use aptos_types::transaction::TransactionListWithProof;
 use claims::{assert_err, assert_matches};
-use std::time::Duration;
+use maplit::hashset;
+use std::{collections::HashSet, time::Duration};
 
 #[tokio::test]
 async fn bad_peer_is_eventually_banned_internal() {
-    ::aptos_logger::Logger::init_for_testing();
-    let (mut mock_network, _, client, _) = MockNetwork::new(None, None, None);
+    // Create the mock network and client
+    let data_client_config = AptosDataClientConfig::default();
+    let (mut mock_network, _, client, _) = MockNetwork::new(None, Some(data_client_config), None);
 
     let good_peer = mock_network.add_peer(true);
     let bad_peer = mock_network.add_peer(true);
@@ -29,9 +32,9 @@ async fn bad_peer_is_eventually_banned_internal() {
     // Bypass poller and just add the storage summaries directly.
 
     // Good peer advertises txns 0 -> 100.
-    client.update_summary(good_peer, utils::create_storage_summary(100));
+    client.update_peer_storage_summary(good_peer, utils::create_storage_summary(100));
     // Bad peer advertises txns 0 -> 200 (but can't actually service).
-    client.update_summary(bad_peer, utils::create_storage_summary(200));
+    client.update_peer_storage_summary(bad_peer, utils::create_storage_summary(200));
     client.update_global_summary_cache().unwrap();
 
     // The global summary should contain the bad peer's advertisement.
@@ -58,10 +61,9 @@ async fn bad_peer_is_eventually_banned_internal() {
         }
     });
 
-    let mut seen_data_unavailable_err = false;
-
     // Sending a bunch of requests to the bad peer's upper range will fail.
-    let request_timeout = client.get_response_timeout_ms();
+    let mut seen_data_unavailable_err = false;
+    let request_timeout = data_client_config.response_timeout_ms;
     for _ in 0..20 {
         let result = client
             .get_transactions_with_proof(200, 200, 200, false, request_timeout)
@@ -102,14 +104,15 @@ async fn bad_peer_is_eventually_banned_internal() {
 
 #[tokio::test]
 async fn bad_peer_is_eventually_banned_callback() {
-    ::aptos_logger::Logger::init_for_testing();
-    let (mut mock_network, _, client, _) = MockNetwork::new(None, None, None);
+    // Create the mock network and client
+    let data_client_config = AptosDataClientConfig::default();
+    let (mut mock_network, _, client, _) = MockNetwork::new(None, Some(data_client_config), None);
 
     let bad_peer = mock_network.add_peer(true);
 
     // Bypass poller and just add the storage summaries directly.
     // Bad peer advertises txns 0 -> 200 (but can't actually service).
-    client.update_summary(bad_peer, utils::create_storage_summary(200));
+    client.update_peer_storage_summary(bad_peer, utils::create_storage_summary(200));
     client.update_global_summary_cache().unwrap();
 
     // Spawn a handler for both peers.
@@ -126,7 +129,7 @@ async fn bad_peer_is_eventually_banned_callback() {
     let mut seen_data_unavailable_err = false;
 
     // Sending a bunch of requests to the bad peer (that we later decide are bad).
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     for _ in 0..20 {
         let result = client
             .get_transactions_with_proof(200, 200, 200, false, request_timeout)
@@ -167,13 +170,18 @@ async fn bad_peer_is_eventually_banned_callback() {
 
 #[tokio::test]
 async fn bad_peer_is_eventually_added_back() {
-    ::aptos_logger::Logger::init_for_testing();
-    let (mut mock_network, mock_time, client, poller) = MockNetwork::new(None, None, None);
+    // Create the mock network, client and poller
+    let data_client_config = AptosDataClientConfig::default();
+    let (mut mock_network, mock_time, client, poller) =
+        MockNetwork::new(None, Some(data_client_config), None);
 
-    // Add a connected peer.
+    // Add a connected peer
     mock_network.add_peer(true);
 
-    tokio::spawn(poller.start_poller());
+    // Start the poller
+    tokio::spawn(poller::start_poller(poller));
+
+    // Spawn a handler that emulates peer responses
     tokio::spawn(async move {
         while let Some(network_request) = mock_network.next_request().await {
             match network_request.storage_service_request.data_request {
@@ -208,10 +216,12 @@ async fn bad_peer_is_eventually_added_back() {
     });
 
     // Advance time so the poller sends data summary requests.
-    let summary_poll_interval = Duration::from_millis(1_000);
-    for _ in 0..2 {
+    let poll_loop_interval_ms = data_client_config.data_poller_config.poll_loop_interval_ms;
+    for _ in 0..10 {
         tokio::task::yield_now().await;
-        mock_time.advance_async(summary_poll_interval).await;
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
     }
 
     // Initially this request range is serviceable by this peer.
@@ -223,7 +233,7 @@ async fn bad_peer_is_eventually_added_back() {
 
     // Keep decreasing this peer's score by considering its responses bad.
     // Eventually its score drops below IGNORE_PEER_THRESHOLD.
-    let request_timeout = client.get_response_timeout_ms();
+    let request_timeout = data_client_config.response_timeout_ms;
     for _ in 0..20 {
         let result = client
             .get_transactions_with_proof(200, 0, 200, false, request_timeout)
@@ -247,10 +257,13 @@ async fn bad_peer_is_eventually_added_back() {
 
     // This peer still responds to the StorageServerSummary requests.
     // Its score keeps increasing and this peer is eventually added back.
-    for _ in 0..20 {
-        mock_time.advance_async(summary_poll_interval).await;
+    for _ in 0..100 {
+        mock_time
+            .advance_async(Duration::from_millis(poll_loop_interval_ms))
+            .await;
     }
 
+    // Verify the peer is no longer ignored and this request range is serviceable
     let global_summary = client.get_global_data_summary();
     assert!(global_summary
         .advertised_data
@@ -260,17 +273,24 @@ async fn bad_peer_is_eventually_added_back() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn disconnected_peers_garbage_collection() {
-    ::aptos_logger::Logger::init_for_testing();
-    let (mut mock_network, _, client, _) = MockNetwork::new(None, None, None);
+    // Create the mock network, client and poller
+    let (mut mock_network, _, client, poller) = MockNetwork::new(None, None, None);
 
-    // Connect several peers
-    let priority_peer_1 = mock_network.add_peer(true);
-    let priority_peer_2 = mock_network.add_peer(true);
-    let priority_peer_3 = mock_network.add_peer(true);
+    // Connect several priority peers
+    let is_priority_peer = true;
+    let priority_peer_1 = mock_network.add_peer(is_priority_peer);
+    let priority_peer_2 = mock_network.add_peer(is_priority_peer);
+    let priority_peer_3 = mock_network.add_peer(is_priority_peer);
 
     // Poll all of the peers to initialize the peer states
-    let all_peers = vec![priority_peer_1, priority_peer_2, priority_peer_3];
-    poll_peers(&mut mock_network, &client, all_peers.clone()).await;
+    let all_peers = hashset![priority_peer_1, priority_peer_2, priority_peer_3];
+    poll_peers(
+        &mut mock_network,
+        &poller,
+        is_priority_peer,
+        all_peers.clone(),
+    )
+    .await;
 
     // Verify we have peer states for all peers
     verify_peer_states(&client, all_peers.clone());
@@ -280,26 +300,32 @@ async fn disconnected_peers_garbage_collection() {
     client.update_global_summary_cache().unwrap();
 
     // Verify we have peer states for only the remaining peers
-    verify_peer_states(&client, vec![priority_peer_2, priority_peer_3]);
+    verify_peer_states(&client, hashset![priority_peer_2, priority_peer_3]);
 
     // Disconnect priority peer 2 and update the global data summary
     mock_network.disconnect_peer(priority_peer_2);
     client.update_global_summary_cache().unwrap();
 
     // Verify we have peer states for only priority peer 3
-    verify_peer_states(&client, vec![priority_peer_3]);
+    verify_peer_states(&client, hashset![priority_peer_3]);
 
     // Reconnect priority peer 1, poll it and update the global data summary
     mock_network.reconnect_peer(priority_peer_1);
-    poll_peers(&mut mock_network, &client, vec![priority_peer_1]).await;
+    poll_peers(&mut mock_network, &poller, is_priority_peer, hashset![
+        priority_peer_1
+    ])
+    .await;
     client.update_global_summary_cache().unwrap();
 
     // Verify we have peer states for priority peer 1 and 3
-    verify_peer_states(&client, vec![priority_peer_1, priority_peer_3]);
+    verify_peer_states(&client, hashset![priority_peer_1, priority_peer_3]);
 
     // Reconnect priority peer 2, poll it and update the global data summary
     mock_network.reconnect_peer(priority_peer_2);
-    poll_peers(&mut mock_network, &client, vec![priority_peer_2]).await;
+    poll_peers(&mut mock_network, &poller, is_priority_peer, hashset![
+        priority_peer_2
+    ])
+    .await;
     client.update_global_summary_cache().unwrap();
 
     // Verify we have peer states for all peers
@@ -310,12 +336,13 @@ async fn disconnected_peers_garbage_collection() {
 /// and returns storage server summaries for each.
 async fn poll_peers(
     mock_network: &mut MockNetwork,
-    client: &AptosDataClient,
-    all_peers: Vec<PeerNetworkId>,
+    poller: &DataSummaryPoller,
+    poll_priority_peers: bool,
+    all_peers: HashSet<PeerNetworkId>,
 ) {
     for peer in all_peers {
         // Poll the peer
-        let handle = poll_peer(client.clone(), peer, None);
+        let handle = poll_peer(poller.clone(), poll_priority_peers, peer);
 
         // Respond to the poll request
         let network_request = mock_network.next_request().await.unwrap();
@@ -330,7 +357,7 @@ async fn poll_peers(
 }
 
 /// Verifies the exclusive existence of peer states for all the specified peers
-fn verify_peer_states(client: &AptosDataClient, all_peers: Vec<PeerNetworkId>) {
+fn verify_peer_states(client: &AptosDataClient, all_peers: HashSet<PeerNetworkId>) {
     let peer_to_states = client.get_peer_states().get_peer_to_states();
     for peer in &all_peers {
         assert!(peer_to_states.contains_key(peer));

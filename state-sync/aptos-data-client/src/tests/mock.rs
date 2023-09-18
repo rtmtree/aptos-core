@@ -23,6 +23,7 @@ use aptos_network::{
     },
     transport::ConnectionMetadata,
 };
+use aptos_peer_monitoring_service_types::PeerMonitoringMetadata;
 use aptos_storage_interface::DbReader;
 use aptos_storage_service_client::StorageServiceClient;
 use aptos_storage_service_server::network::{NetworkRequest, ResponseSender};
@@ -55,6 +56,9 @@ impl MockNetwork {
         data_client_config: Option<AptosDataClientConfig>,
         networks: Option<Vec<NetworkId>>,
     ) -> (Self, MockTimeService, AptosDataClient, DataSummaryPoller) {
+        // Initialize the logger for testing
+        ::aptos_logger::Logger::init_for_testing();
+
         // Setup the request managers
         let queue_cfg = aptos_channel::Config::new(10).queue_style(QueueStyle::FIFO);
         let (peer_mgr_reqs_tx, peer_mgr_reqs_rx) = queue_cfg.build();
@@ -136,6 +140,12 @@ impl MockNetwork {
             .insert(ProtocolId::StorageServiceRpc);
         self.peers_and_metadata
             .insert_connection_metadata(peer_network_id, connection_metadata)
+            .unwrap();
+
+        // Insert peer monitoring metadata for the peer
+        let peer_monitoring_metadata = PeerMonitoringMetadata::new(Some(1.0), None, None, None);
+        self.peers_and_metadata
+            .update_peer_monitoring_metadata(peer_network_id, peer_monitoring_metadata)
             .unwrap();
 
         // Return the new peer
